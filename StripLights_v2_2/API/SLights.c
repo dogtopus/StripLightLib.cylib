@@ -228,18 +228,22 @@ void `$INSTANCE_NAME`_Start()
 
         `$INSTANCE_NAME`_initvar = 1;
  
-         /* Start and set interrupt vector */
+        /* Start and set transfer backend (interrupt vector or DMA channel) */
 
 #if(`$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_ISR)
-       {
-           `$INSTANCE_NAME`_cisr_StartEx(`$INSTANCE_NAME`_CISR);
-		   `$INSTANCE_NAME`_fisr_StartEx(`$INSTANCE_NAME`_FISR);
-       }
+        {
+            `$INSTANCE_NAME`_cisr_StartEx(`$INSTANCE_NAME`_CISR);
+		    `$INSTANCE_NAME`_fisr_StartEx(`$INSTANCE_NAME`_FISR);
+        }
+#elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+        {
+            // TODO: DMA channel initialization
+        }
 #endif       
        if(`$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_FIRMWARE)
-       {
-           `$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE;    
-       }
+        {
+            `$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE;    
+        }
     }
     `$INSTANCE_NAME`_refreshComplete = 1;
 }
