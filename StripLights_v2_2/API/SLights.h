@@ -14,7 +14,8 @@
 #include "cytypes.h"
 #include "cyfitter.h"
 
-/* Function Prototypes */
+
+/* Function Prototypes - API */
 void   `$INSTANCE_NAME`_Start(void);
 void   `$INSTANCE_NAME`_Stop(void);
 void   `$INSTANCE_NAME`_WriteColor(uint32 color);
@@ -38,7 +39,8 @@ void   `$INSTANCE_NAME`_Dim(uint32 dimLevel);
 #define `$INSTANCE_NAME`_DimLevel_4   4
 
 
-
+/* Function Prototypes - ISR */
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_ISR
 
 #define `$INSTANCE_NAME`_CIRQ_Enable() CyIntEnable(`$INSTANCE_NAME`_CIRQ__INTC_NUMBER ); 
 #define `$INSTANCE_NAME`_CIRQ_Disable() CyIntDisable(`$INSTANCE_NAME`_CIRQ__INTC_NUMBER );
@@ -47,6 +49,15 @@ CY_ISR_PROTO(`$INSTANCE_NAME`_CISR);
 #define `$INSTANCE_NAME`_FIRQ_Enable() CyIntEnable(`$INSTANCE_NAME`_FIRQ__INTC_NUMBER ); 
 #define `$INSTANCE_NAME`_FIRQ_Disable() CyIntDisable(`$INSTANCE_NAME`_FIRQ__INTC_NUMBER );
 CY_ISR_PROTO(`$INSTANCE_NAME`_FISR);
+
+#elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_ISR
+
+#define `$INSTANCE_NAME`_CIRQ_Enable() CyIntEnable(`$INSTANCE_NAME`_CIRQ__INTC_NUMBER ); 
+#define `$INSTANCE_NAME`_CIRQ_Disable() CyIntDisable(`$INSTANCE_NAME`_CIRQ__INTC_NUMBER );
+CY_ISR_PROTO(`$INSTANCE_NAME`_CISR);
+
+#endif
+
 
 /* Register Definitions */
 #define `$INSTANCE_NAME`_DATA         (*(reg8 *) `$INSTANCE_NAME`_B_WS2811_dshifter_u0__F0_REG)

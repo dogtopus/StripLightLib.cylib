@@ -12,22 +12,17 @@
 // ========================================
 `include "cypress.v"
 //`#end` -- edit above this line, do not edit this line
-// Generated on 11/12/2011 at 15:55
+// Generated on 03/05/2020 at 14:18
 // Component: B_WS2811_v1_3
 module B_WS2811_v1_3 (
-	firq,
-	cirq,
-	sout,
-	cntl,
-	clk,
-	reset
+	output  cirq,
+	output  cntl,
+	output  fifo_rdy,
+	output  firq,
+	output  sout,
+	input   clk,
+	input   reset
 );
-	output  cirq;
-	output  firq;
-	output  sout;
-	output  cntl;
-	input   clk;
-	input   reset;
 
 //`#start body` -- edit after this line, do not edit this line
 
@@ -108,6 +103,7 @@ module B_WS2811_v1_3 (
     
   assign firq  = (fifoEmpty & fifo_irq_en) & enable;
   assign cirq  =  (xferCmpt & xfrCmpt_irq_en) & enable;
+  assign fifo_rdy = fifoNotFull && enable;
 
 	always @(posedge clk or posedge reset )
 	begin
@@ -204,11 +200,7 @@ module B_WS2811_v1_3 (
             
 		endcase
 		end
-	end	
-	
-	
-	
-
+	end
 //`#end` -- edit above this line, do not edit this line
 cy_psoc3_dp8 #(.cy_dpconfig_a(
 {
@@ -369,16 +361,3 @@ cy_psoc3_dp8 #(.a0_init_a(24), .a1_init_a(24), .d0_init_a(20),
 endmodule
 //`#start footer` -- edit after this line, do not edit this line
 //`#end` -- edit above this line, do not edit this line
-
-
-
-
-
-
-
-
-
-
-
-
-

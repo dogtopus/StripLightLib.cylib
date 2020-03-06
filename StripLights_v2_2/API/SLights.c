@@ -28,6 +28,10 @@ uint32  `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_ARRAY_ROWS][`$INSTANCE_NAME`_
 uint8   `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_ARRAY_ROWS][`$INSTANCE_NAME`_ARRAY_COLS];
 #endif
 
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+uint8 `$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_ARRAY_COLS*3];
+#endif
+
 uint32  `$INSTANCE_NAME`_ledIndex = 0;  
 uint32  `$INSTANCE_NAME`_row = 0;
 uint32  `$INSTANCE_NAME`_refreshComplete;
@@ -189,6 +193,37 @@ const uint32 `$INSTANCE_NAME`_CLUT[ ] = {
 
 
 
+static inline uint32 _get_effective_pixel(uint32 row, uint32 col)
+{
+    uint32 color;
+    #if(`$INSTANCE_NAME`_MEMORY_TYPE == `$INSTANCE_NAME`_MEMORY_RGB)
+        color = `$INSTANCE_NAME`_ledArray[row][col];
+    #else  /* Else use lookup table */
+        color = `$INSTANCE_NAME`_CLUT[ (`$INSTANCE_NAME`_ledArray[row][col]) ];
+    #endif
+    return (color >> `$INSTANCE_NAME`_DimShift) & `$INSTANCE_NAME`_DimMask;
+}
+
+static inline void _queue_pixel(uint32 color)
+{
+    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Green
+    color = color >> 8;
+    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Red
+    color = color >> 8;
+    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Blue
+}
+
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+static inline void _write_pixel_dma(uint32 col, uint32 color)
+{
+    `$INSTANCE_NAME`_dmaBuffer[3*col] = (uint8) (color & 0xff); // G
+    color >>= 8;
+    `$INSTANCE_NAME`_dmaBuffer[3*col+1] = (uint8) (color & 0xff); // R
+    color >>= 8;
+    `$INSTANCE_NAME`_dmaBuffer[3*col+2] = (uint8) (color & 0xff); // B
+}
+#endif
+
 /*******************************************************************************
 * Function Name: `$INSTANCE_NAME`_Start
 ********************************************************************************
@@ -237,7 +272,10 @@ void `$INSTANCE_NAME`_Start()
         }
 #elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
         {
-            // TODO: DMA channel initialization
+            // DMA channel initialization
+            `$INSTANCE_NAME`_DMA_Start(`$INSTANCE_NAME`_dmaBuffer, &`$INSTANCE_NAME`_DATA);
+            `$INSTANCE_NAME`_DMA_SetNumDataElements(sizeof(`$INSTANCE_NAME`_dmaBuffer));
+            `$INSTANCE_NAME`_cisr_StartEx(`$INSTANCE_NAME`_CISR);
         }
 #endif       
        if(`$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_FIRMWARE)
@@ -256,40 +294,36 @@ void `$INSTANCE_NAME`_Start()
 *   Update the LEDs with graphics memory.
 *
 * Parameters:  
-*  void  
+*   uint32 rst: Whether or not start drawing from the beginning.
 *
 * Return: 
-*  void
+*   void
 *
 *******************************************************************************/
 void `$INSTANCE_NAME`_Trigger(uint32 rst)
 {
-    uint32 color;
-    
     if(rst) 
     {
         `$INSTANCE_NAME`_row = 0;  /* Reset the row */
         `$INSTANCE_NAME`_Channel = 0;
     }
-    
-    #if(`$INSTANCE_NAME`_MEMORY_TYPE == `$INSTANCE_NAME`_MEMORY_RGB)
-       color = `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_row][0];
-    #else  /* Else use lookup table */
-       color = `$INSTANCE_NAME`_CLUT[ (`$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_row][0]) ];
+    #if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+        // Fill the DMA buffer
+        for (uint32 i=0; i<`$INSTANCE_NAME`_ARRAY_COLS; i++) {
+            _write_pixel_dma(i, _get_effective_pixel(`$INSTANCE_NAME`_row, i));
+        }
+        // Let the DMA kick. O(ry
+        `$INSTANCE_NAME`_DMA_Trigger();
+    #else
+        // Initial buffering
+        _queue_pixel(_get_effective_pixel(`$INSTANCE_NAME`_row, 0));
+        
+        `$INSTANCE_NAME`_ledIndex = 1;
     #endif
-    
-     color = (color >> `$INSTANCE_NAME`_DimShift) & `$INSTANCE_NAME`_DimMask;
-     
-    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Red
-    color = color >> 8;
-    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write green
-    color = color >> 8;
-    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write green
-    
-    `$INSTANCE_NAME`_ledIndex = 1;
- //   `$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
-	
+
+    // Enable the transmitter and row+column interrupt out.
 	`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_XFRCMPT_IRQ_EN | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
+    // Clear the ready bit.
     `$INSTANCE_NAME`_refreshComplete = 0;
 }
 
@@ -371,6 +405,9 @@ uint32 `$INSTANCE_NAME`_ColorInc(uint32 incValue)
 
     return(color);
 }
+
+/* Interrupt vectors for Interrupt transfer */
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_ISR
 /*****************************************************************************
 * Function Name: `$INSTANCE_NAME`_FISR
 ******************************************************************************
@@ -390,25 +427,10 @@ uint32 `$INSTANCE_NAME`_ColorInc(uint32 incValue)
 *****************************************************************************/
 CY_ISR( `$INSTANCE_NAME`_FISR)
 {
-    extern uint32  `$INSTANCE_NAME`_DimMask;
-    extern uint32  `$INSTANCE_NAME`_DimShift;
-    uint32 static color;
 
     if(`$INSTANCE_NAME`_ledIndex < `$INSTANCE_NAME`_ARRAY_COLS)
     {
-        #if(`$INSTANCE_NAME`_MEMORY_TYPE == `$INSTANCE_NAME`_MEMORY_RGB)
-            color = `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_row][`$INSTANCE_NAME`_ledIndex++];
-        #else  /* Else use lookup table */
-            color = `$INSTANCE_NAME`_CLUT[ (`$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_row][`$INSTANCE_NAME`_ledIndex++]) ];
-        #endif
-
-        color = (color >> `$INSTANCE_NAME`_DimShift) & `$INSTANCE_NAME`_DimMask;  
-
-        `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Green
-        color = color >> 8;
-        `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Red
-        color = color >> 8;
-        `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Blue
+        _queue_pixel(_get_effective_pixel(`$INSTANCE_NAME`_row, `$INSTANCE_NAME`_ledIndex++));
     }
     else 
     {
@@ -436,9 +458,6 @@ CY_ISR( `$INSTANCE_NAME`_FISR)
 *****************************************************************************/
 CY_ISR( `$INSTANCE_NAME`_CISR)
 {
-    extern uint32  `$INSTANCE_NAME`_DimMask;
-    extern uint32  `$INSTANCE_NAME`_DimShift;
-    uint32 static color;
     extern uint32 `$INSTANCE_NAME`_refreshComplete;
 
 	`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE |`$INSTANCE_NAME`_NEXT_ROW;
@@ -446,24 +465,10 @@ CY_ISR( `$INSTANCE_NAME`_CISR)
     if( `$INSTANCE_NAME`_row < `$INSTANCE_NAME`_ARRAY_ROWS)  /* More Rows to do  */
     {
         `$INSTANCE_NAME`_Channel = `$INSTANCE_NAME`_row;  
-
-		#if(`$INSTANCE_NAME`_MEMORY_TYPE == `$INSTANCE_NAME`_MEMORY_RGB)
-             color = `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_row][0];
-        #else  /* Else use lookup table */
-             color = `$INSTANCE_NAME`_CLUT[ (`$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_row][0]) ];
-        #endif
-
-        color = (color >> `$INSTANCE_NAME`_DimShift) & `$INSTANCE_NAME`_DimMask;
- 
-        `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  /* Write Red   */
-        color = color >> 8;
-        `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  /* Write green */
-        color = color >> 8;
-        `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  /* Write green */
+        _queue_pixel(_get_effective_pixel(`$INSTANCE_NAME`_row, 0));
 
         `$INSTANCE_NAME`_ledIndex = 1;
 		`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
-		
     }
     else
     {
@@ -472,6 +477,50 @@ CY_ISR( `$INSTANCE_NAME`_CISR)
   
 }
 
+#elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+
+/*****************************************************************************
+* Function Name: `$INSTANCE_NAME`_CISR
+******************************************************************************
+*
+* Summary:
+*  Interrupt service handler after each row is complete.
+*
+* Parameters:  
+*  void
+*
+* Return: 
+*  void 
+*
+* Reentrant: 
+*  No
+*
+*****************************************************************************/
+CY_ISR( `$INSTANCE_NAME`_CISR)
+{
+    extern uint32 `$INSTANCE_NAME`_refreshComplete;
+    static uint32 i;
+
+	`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE |`$INSTANCE_NAME`_NEXT_ROW;
+    `$INSTANCE_NAME`_row++;
+    if( `$INSTANCE_NAME`_row < `$INSTANCE_NAME`_ARRAY_ROWS)  /* More Rows to do  */
+    {
+        `$INSTANCE_NAME`_Channel = `$INSTANCE_NAME`_row;
+        // Drop cisr priority might be necessary to cut down overall latency when multiline is involved.
+        // TODO should we buffer everything instead?
+        for (i=0; i<`$INSTANCE_NAME`_ARRAY_COLS; i++) {
+            _write_pixel_dma(i, _get_effective_pixel(`$INSTANCE_NAME`_row, i));
+        }
+        `$INSTANCE_NAME`_DMA_Trigger();
+		`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
+    }
+    else
+    {
+        `$INSTANCE_NAME`_refreshComplete = 1u;
+    }
+
+}
+#endif // `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_ISR
 
 /*******************************************************************************
 * Function Name: `$INSTANCE_NAME`_DisplayClear
@@ -541,12 +590,7 @@ void `$INSTANCE_NAME`_MemClear(uint32 color)
 void `$INSTANCE_NAME`_WriteColor(uint32 color)
 {
     while( (`$INSTANCE_NAME`_STATUS & `$INSTANCE_NAME`_FIFO_EMPTY) == 0); 
-
-    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Green
-    color = color >> 8;
-    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Red
-    color = color >> 8;
-    `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Blue
+    _queue_pixel(color);
 }
 
 
