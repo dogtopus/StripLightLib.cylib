@@ -647,6 +647,10 @@ uint32 `$INSTANCE_NAME`_GetPixel(int32 x, int32 y)
        color = (uint32)`$INSTANCE_NAME`_ledArray[y][x];
     #endif
     }
+    else
+    {
+        color = 0;
+    }
     return(color);
 }
 

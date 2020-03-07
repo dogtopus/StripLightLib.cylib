@@ -37,7 +37,6 @@ module B_WS2811_v1_3 (
 	wire fifoEmpty;      // FIFO empty signal
 	wire fifoNotFull;    // FIFO not full signal
 	wire enable;         // Enable module
-	wire cntl;           // Spare control output
     wire zeroBit;
     wire oneBit;
     
