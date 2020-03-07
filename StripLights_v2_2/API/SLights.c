@@ -29,7 +29,7 @@ uint8   `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_ARRAY_ROWS][`$INSTANCE_NAME`_
 #endif
 
 #if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
-uint8 `$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_ARRAY_COLS*3];
+static uint8 `$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_ARRAY_COLS*3];
 #endif
 
 uint32  `$INSTANCE_NAME`_ledIndex = 0;  
@@ -213,6 +213,10 @@ static inline void _queue_pixel(uint32 color)
     `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Blue
 }
 
+static void _on_dma_completion() {
+    `$INSTANCE_NAME`_DMA_ChDisable();
+}
+
 #if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
 static inline void _write_pixel_dma(uint32 col, uint32 color)
 {
@@ -273,9 +277,11 @@ void `$INSTANCE_NAME`_Start()
 #elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
         {
             // DMA channel initialization
-            `$INSTANCE_NAME`_DMA_Start(`$INSTANCE_NAME`_dmaBuffer, &`$INSTANCE_NAME`_DATA);
-            `$INSTANCE_NAME`_DMA_SetNumDataElements(sizeof(`$INSTANCE_NAME`_dmaBuffer));
+            `$INSTANCE_NAME`_DMA_Start(`$INSTANCE_NAME`_dmaBuffer, (void *) &`$INSTANCE_NAME`_DATA);
+            `$INSTANCE_NAME`_DMA_SetInterruptCallback(&_on_dma_completion);
+            `$INSTANCE_NAME`_DMA_SetNumDataElements(0, sizeof(`$INSTANCE_NAME`_dmaBuffer));
             `$INSTANCE_NAME`_cisr_StartEx(`$INSTANCE_NAME`_CISR);
+            CyIntEnable(CYDMA_INTR_NUMBER);
         }
 #endif       
        if(`$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_FIRMWARE)
@@ -313,6 +319,7 @@ void `$INSTANCE_NAME`_Trigger(uint32 rst)
             _write_pixel_dma(i, _get_effective_pixel(`$INSTANCE_NAME`_row, i));
         }
         // Let the DMA kick. O(ry
+        `$INSTANCE_NAME`_DMA_ChEnable();
         `$INSTANCE_NAME`_DMA_Trigger();
     #else
         // Initial buffering
@@ -511,6 +518,7 @@ CY_ISR( `$INSTANCE_NAME`_CISR)
         for (i=0; i<`$INSTANCE_NAME`_ARRAY_COLS; i++) {
             _write_pixel_dma(i, _get_effective_pixel(`$INSTANCE_NAME`_row, i));
         }
+        `$INSTANCE_NAME`_DMA_ChEnable();
         `$INSTANCE_NAME`_DMA_Trigger();
 		`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
     }
