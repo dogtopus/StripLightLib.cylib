@@ -12,11 +12,6 @@ There are several potential ways to fix/workaround this, including splitting the
 
 (1): About 10us after some primitive inspection, which is even lower than the 50us reset/break mark of WS281x chips.
 
-## Limitations
-
-- The current DMA implementation only buffers a single column and relies on the column ISR to buffer the next, which could potentially increase interrupt latency by a lot. Future version may buffer the entire framebuffer at once instead.
-- Significantly higher memory usage due to the raw 24-bit GRB buffer being always present no matter the use of CLUT or not. It's not as bad as the NeoPixel-ZeroDMA or NeoPXL8 but still quite significant compare to ISR mode.
-
 ## License
 
 Ask Mark. Don't ask me. :S
