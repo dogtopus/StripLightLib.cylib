@@ -235,7 +235,7 @@ static inline void _write_pixel_single(uint8 *target, uint32 color)
 // Write a pixel at a specific row and column to the DMA buffer. Only available when using All At Once strat.
 static inline void _write_pixel_buffer(uint32 row, uint32 col, uint32 color)
 {
-    _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[row][3*col], color)
+    _write_pixel_single(&`$INSTANCE_NAME`_dmaBuffer[row][3*col], color);
 }
 #endif
 #endif
