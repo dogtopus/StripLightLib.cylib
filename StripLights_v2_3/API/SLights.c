@@ -28,8 +28,15 @@ uint32  `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_ARRAY_ROWS][`$INSTANCE_NAME`_
 uint8   `$INSTANCE_NAME`_ledArray[`$INSTANCE_NAME`_ARRAY_ROWS][`$INSTANCE_NAME`_ARRAY_COLS];
 #endif
 
-#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
-static uint8 `$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_ARRAY_COLS*3];
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA && `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_ALL
+// All LEDs
+static uint8 `$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_ARRAY_ROWS][`$INSTANCE_NAME`_ARRAY_COLS*3];
+#define `$INSTANCE_NAME`_DMA_ELEMENTS `$INSTANCE_NAME`_ARRAY_COLS*3
+#elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA && `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_PER_LED
+// Double buffer single LED
+static uint8 `$INSTANCE_NAME`_dmaBuffer[2][3];
+#define `$INSTANCE_NAME`_DMA_ELEMENTS 3
+static uint8 `$INSTANCE_NAME`_availableBuffer = 0;
 #endif
 
 uint32  `$INSTANCE_NAME`_ledIndex = 0;  
@@ -213,18 +220,47 @@ static inline void _queue_pixel(uint32 color)
     `$INSTANCE_NAME`_DATA = (uint8)(color & 0x000000FF);  // Write Blue
 }
 
-static void _on_dma_completion() {
-    `$INSTANCE_NAME`_DMA_ChDisable();
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+// Write a single RGB pixel to the specified memory address as GRB
+static inline void _write_pixel_single(uint8 *target, uint32 color)
+{
+    target[0] = (uint8) (color & 0xff); // G
+    color >>= 8;
+    target[1] = (uint8) (color & 0xff); // R
+    color >>= 8;
+    target[2] = (uint8) (color & 0xff); // B
 }
 
-#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
-static inline void _write_pixel_dma(uint32 col, uint32 color)
+#if `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_ALL
+// Write a pixel at a specific row and column to the DMA buffer. Only available when using All At Once strat.
+static inline void _write_pixel_buffer(uint32 row, uint32 col, uint32 color)
 {
-    `$INSTANCE_NAME`_dmaBuffer[3*col] = (uint8) (color & 0xff); // G
-    color >>= 8;
-    `$INSTANCE_NAME`_dmaBuffer[3*col+1] = (uint8) (color & 0xff); // R
-    color >>= 8;
-    `$INSTANCE_NAME`_dmaBuffer[3*col+2] = (uint8) (color & 0xff); // B
+    _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[row][3*col], color)
+}
+#endif
+#endif
+
+#if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+static void _on_dma_completion() {
+    `$INSTANCE_NAME`_DMA_ChDisable();
+    #if `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_PER_LED
+    if (`$INSTANCE_NAME`_ledIndex < `$INSTANCE_NAME`_ARRAY_COLS) {
+        // The next LED data to be prepared is always 1 LED ahead of the next LED. For example if we finished sending data for LED #0 and moving to #1, we need to prepare data for LED #2 now.
+        `$INSTANCE_NAME`_ledIndex++;
+        // Still more data to buffer
+        if (`$INSTANCE_NAME`_ledIndex < `$INSTANCE_NAME`_ARRAY_COLS) {
+            _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_availableBuffer], _get_effective_pixel(`$INSTANCE_NAME`_row, `$INSTANCE_NAME`_ledIndex));
+        }
+        // Next available buffer will be the opposite buffer
+        `$INSTANCE_NAME`_availableBuffer ^= 1;
+        // Use the opposite buffer of the one we just modified for next DMA
+        `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &(`$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_availableBuffer]));
+        // Re-enable DMA
+        `$INSTANCE_NAME`_DMA_ChEnable();
+    }
+    #endif
+    // Enable and wait for row interrupt
+    `$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_XFRCMPT_IRQ_EN;
 }
 #endif
 
@@ -279,7 +315,7 @@ void `$INSTANCE_NAME`_Start()
             // DMA channel initialization
             `$INSTANCE_NAME`_DMA_Start(`$INSTANCE_NAME`_dmaBuffer, (void *) &`$INSTANCE_NAME`_DATA);
             `$INSTANCE_NAME`_DMA_SetInterruptCallback(&_on_dma_completion);
-            `$INSTANCE_NAME`_DMA_SetNumDataElements(0, sizeof(`$INSTANCE_NAME`_dmaBuffer));
+            `$INSTANCE_NAME`_DMA_SetNumDataElements(0, `$INSTANCE_NAME`_DMA_ELEMENTS);
             `$INSTANCE_NAME`_cisr_StartEx(`$INSTANCE_NAME`_CISR);
             CyIntEnable(CYDMA_INTR_NUMBER);
         }
@@ -314,22 +350,38 @@ void `$INSTANCE_NAME`_Trigger(uint32 rst)
         `$INSTANCE_NAME`_Channel = 0;
     }
     #if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+    #if `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_ALL
         // Fill the DMA buffer
-        for (uint32 i=0; i<`$INSTANCE_NAME`_ARRAY_COLS; i++) {
-            _write_pixel_dma(i, _get_effective_pixel(`$INSTANCE_NAME`_row, i));
+        for (uint32 row=`$INSTANCE_NAME`_row; row<`$INSTANCE_NAME`_ARRAY_ROWS; row++) {
+            for (uint32 col=0; col<`$INSTANCE_NAME`_ARRAY_COLS; col++) {
+                _write_pixel_buffer(row, col, _get_effective_pixel(row, col));
+            }
         }
+        `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &(`$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_row]));
+    #elif `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_PER_LED
+        _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[0], _get_effective_pixel(`$INSTANCE_NAME`_row, 0));
+        _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[1], _get_effective_pixel(`$INSTANCE_NAME`_row, 1));
+        `$INSTANCE_NAME`_availableBuffer = 0;
+        // Next LED will be #1
+        `$INSTANCE_NAME`_ledIndex = 1;
+        `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &(`$INSTANCE_NAME`_dmaBuffer[0]));
+    #endif // `$INSTANCE_NAME`_DMA_STRAT
         // Let the DMA kick. O(ry
         `$INSTANCE_NAME`_DMA_ChEnable();
         `$INSTANCE_NAME`_DMA_Trigger();
+
+        // Enable the TX only since we don't use FIFO/column interrupt in DMA mode.
+        // Row interrupt will be enabled right after all elements are written to the FIFO so we can switch the row.
+        `$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE;
     #else
         // Initial buffering
         _queue_pixel(_get_effective_pixel(`$INSTANCE_NAME`_row, 0));
-        
         `$INSTANCE_NAME`_ledIndex = 1;
-    #endif
 
-    // Enable the transmitter and row+column interrupt out.
-	`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_XFRCMPT_IRQ_EN | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
+        // Enable the row and column interrupt and TX.
+        `$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_XFRCMPT_IRQ_EN | `$INSTANCE_NAME`_FIFO_IRQ_EN;
+    #endif // `$INSTANCE_NAME`_TRANSFER
+
     // Clear the ready bit.
     `$INSTANCE_NAME`_refreshComplete = 0;
 }
@@ -415,6 +467,7 @@ uint32 `$INSTANCE_NAME`_ColorInc(uint32 incValue)
 
 /* Interrupt vectors for Interrupt transfer */
 #if `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_ISR
+// FISR and CISR for ISR transfer
 /*****************************************************************************
 * Function Name: `$INSTANCE_NAME`_FISR
 ******************************************************************************
@@ -485,6 +538,7 @@ CY_ISR( `$INSTANCE_NAME`_CISR)
 }
 
 #elif `$INSTANCE_NAME`_TRANSFER == `$INSTANCE_NAME`_TRANSFER_DMA
+// CISR for DMA transfer
 
 /*****************************************************************************
 * Function Name: `$INSTANCE_NAME`_CISR
@@ -506,21 +560,29 @@ CY_ISR( `$INSTANCE_NAME`_CISR)
 CY_ISR( `$INSTANCE_NAME`_CISR)
 {
     extern uint32 `$INSTANCE_NAME`_refreshComplete;
-    static uint32 i;
 
+    // Notify the TX to switch row
 	`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE |`$INSTANCE_NAME`_NEXT_ROW;
     `$INSTANCE_NAME`_row++;
     if( `$INSTANCE_NAME`_row < `$INSTANCE_NAME`_ARRAY_ROWS)  /* More Rows to do  */
     {
         `$INSTANCE_NAME`_Channel = `$INSTANCE_NAME`_row;
-        // Drop cisr priority might be necessary to cut down overall latency when multiline is involved.
-        // TODO should we buffer everything instead?
-        for (i=0; i<`$INSTANCE_NAME`_ARRAY_COLS; i++) {
-            _write_pixel_dma(i, _get_effective_pixel(`$INSTANCE_NAME`_row, i));
-        }
+        #if `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_ALL
+            // Switch row of DMA buffer
+            `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &(`$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_row]));
+        #elif `$INSTANCE_NAME`_DMA_STRAT == `$INSTANCE_NAME`_DMA_STRAT_PER_LED
+            // Fill the double buffer
+            _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[0], _get_effective_pixel(`$INSTANCE_NAME`_row, 0));
+            _write_pixel_single(`$INSTANCE_NAME`_dmaBuffer[1], _get_effective_pixel(`$INSTANCE_NAME`_row, 1));
+            // Reset DMA control states
+            `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &`$INSTANCE_NAME`_dmaBuffer);
+            `$INSTANCE_NAME`_ledIndex = 1;
+            `$INSTANCE_NAME`_availableBuffer = 0;
+        #endif
+
         `$INSTANCE_NAME`_DMA_ChEnable();
         `$INSTANCE_NAME`_DMA_Trigger();
-		`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE | `$INSTANCE_NAME`_FIFO_IRQ_EN; 
+		`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE;
     }
     else
     {
