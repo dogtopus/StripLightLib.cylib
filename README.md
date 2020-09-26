@@ -10,7 +10,7 @@ The original interrupt-based implementation behaves strangely when there are oth
 
 There are several potential ways to fix/workaround this, including splitting the strip to different columns and transfer them column-by-column without column interrupts (which sounds a bit hacky to me), or tinkering with the interrupt priority to prioritize the row interrupt (which never worked for me), and so forth. However the ultimate solution IMO is moving to DMA. By using DMA the CPU involvement on row transfer became minimal (as in practically zero) and the timing issue mentioned above no longer exist.
 
-(1): About 10us after some primitive inspection, which is even lower than the 50us reset/break mark of WS281x chips.
+(1): About 10us after some preliminary inspections, which is only 1/5 of the 50us reset/break mark of WS281x chips.
 
 ## License
 
