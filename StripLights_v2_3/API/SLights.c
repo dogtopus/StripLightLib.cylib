@@ -256,6 +256,7 @@ static void _on_dma_completion() {
         // Use the opposite buffer of the one we just modified for next DMA
         `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &(`$INSTANCE_NAME`_dmaBuffer[`$INSTANCE_NAME`_availableBuffer]));
         // Re-enable DMA
+        `$INSTANCE_NAME`_DMA_ValidateDescriptor(0);
         `$INSTANCE_NAME`_DMA_ChEnable();
     }
     #endif
@@ -367,6 +368,7 @@ void `$INSTANCE_NAME`_Trigger(uint32 rst)
         `$INSTANCE_NAME`_DMA_SetSrcAddress(0, &(`$INSTANCE_NAME`_dmaBuffer[0]));
     #endif // `$INSTANCE_NAME`_DMA_STRAT
         // Let the DMA kick. O(ry
+        `$INSTANCE_NAME`_DMA_ValidateDescriptor(0);
         `$INSTANCE_NAME`_DMA_ChEnable();
         `$INSTANCE_NAME`_DMA_Trigger();
 
@@ -580,6 +582,7 @@ CY_ISR( `$INSTANCE_NAME`_CISR)
             `$INSTANCE_NAME`_availableBuffer = 0;
         #endif
 
+        `$INSTANCE_NAME`_DMA_ValidateDescriptor(0);
         `$INSTANCE_NAME`_DMA_ChEnable();
         `$INSTANCE_NAME`_DMA_Trigger();
 		`$INSTANCE_NAME`_CONTROL = `$INSTANCE_NAME`_ENABLE;
